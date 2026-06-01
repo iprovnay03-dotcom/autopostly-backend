@@ -185,6 +185,34 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+app.post("/api/generate", async (req, res) => {
+  const { message, platform, contentType, tone } = req.body;
+  if (!message) return res.status(400).json({ error: "Нет текста" });
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama3-8b-8192",
+        messages: [
+          { role: "system", content: `Ты профессиональный SMM-копирайтер. Пишешь посты на русском языке. Платформа: ${platform || "Telegram"}. Тип: ${contentType || "Пост"}. Тон: ${tone || "Дружелюбный"}. Пиши живо, 5-8 строк, с эмодзи.` },
+          { role: "user", content: message }
+        ],
+        max_tokens: 500,
+        temperature: 0.8
+      })
+    });
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content || "Не удалось получить ответ.";
+    res.json({ text });
+  } catch (err) {
+    res.status(500).json({ error: "Ошибка генерации" });
+  }
+});
+
 cron.schedule("* * * * *", async () => {
   const now = new Date();
   const db = readDB();
