@@ -7,13 +7,14 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const TelegramBot = require("node-telegram-bot-api");
 const cron = require("node-cron");
-
+const axios = require("axios");
+ 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const DB_FILE = path.join(__dirname, "db.json");
-
+ 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
-
+ 
 function readDB() {
   if (!fs.existsSync(DB_FILE)) {
     const empty = { users: [], posts: [] };
@@ -22,14 +23,14 @@ function readDB() {
   }
   return JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
 }
-
+ 
 function writeDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
-
+ 
 app.use(cors({ origin: "*", credentials: true }));
 app.use(express.json({ limit: "50mb" }));
-
+ 
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
@@ -47,7 +48,7 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: "Токен недействителен" });
   }
 }
-
+ 
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
@@ -82,7 +83,7 @@ app.post("/api/auth/register", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -98,13 +99,13 @@ app.post("/api/auth/login", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 app.get("/api/posts", authMiddleware, (req, res) => {
   const db = readDB();
   const posts = db.posts.filter(p => p.userId === req.user.id);
   res.json(posts);
 });
-
+ 
 app.post("/api/posts", authMiddleware, (req, res) => {
   try {
     const { title, text, platforms, scheduledAt, workspace, goal } = req.body;
@@ -130,7 +131,7 @@ app.post("/api/posts", authMiddleware, (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 app.delete("/api/posts/:id", authMiddleware, (req, res) => {
   const db = readDB();
   const index = db.posts.findIndex(p => p.id === req.params.id && p.userId === req.user.id);
@@ -139,7 +140,7 @@ app.delete("/api/posts/:id", authMiddleware, (req, res) => {
   writeDB(db);
   res.json({ message: "Пост удалён" });
 });
-
+ 
 app.get("/api/connections", authMiddleware, (req, res) => {
   const conn = req.user.connections || {};
   res.json({
@@ -150,7 +151,7 @@ app.get("/api/connections", authMiddleware, (req, res) => {
     youtube: { connected: conn.youtube?.connected || false },
   });
 });
-
+ 
 app.post("/api/connections/telegram", authMiddleware, async (req, res) => {
   try {
     const { channelId } = req.body;
@@ -169,7 +170,7 @@ app.post("/api/connections/telegram", authMiddleware, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+ 
 app.delete("/api/connections/:platform", authMiddleware, (req, res) => {
   const platform = req.params.platform.toLowerCase();
   const db = readDB();
@@ -180,39 +181,44 @@ app.delete("/api/connections/:platform", authMiddleware, (req, res) => {
   writeDB(db);
   res.json({ success: true });
 });
-
+ 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
-
+ 
 app.post("/api/generate", async (req, res) => {
   const { message, platform, contentType, tone } = req.body;
   if (!message) return res.status(400).json({ error: "Нет текста" });
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
-      },
-      body: JSON.stringify({
+    const response = await axios.post(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
         model: "llama3-8b-8192",
         messages: [
-          { role: "system", content: `Ты профессиональный SMM-копирайтер. Пишешь посты на русском языке. Платформа: ${platform || "Telegram"}. Тип: ${contentType || "Пост"}. Тон: ${tone || "Дружелюбный"}. Пиши живо, 5-8 строк, с эмодзи.` },
+          {
+            role: "system",
+            content: `Ты профессиональный SMM-копирайтер. Пишешь посты на русском языке. Платформа: ${platform || "Telegram"}. Тип: ${contentType || "Пост"}. Тон: ${tone || "Дружелюбный"}. Пиши живо, 5-8 строк, с эмодзи.`
+          },
           { role: "user", content: message }
         ],
         max_tokens: 500,
         temperature: 0.8
-      })
-    });
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || "Не удалось получить ответ.";
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+        }
+      }
+    );
+    const text = response.data.choices?.[0]?.message?.content || "Не удалось получить ответ.";
     res.json({ text });
   } catch (err) {
-    res.status(500).json({ error: "Ошибка генерации" });
+    console.error("Groq error:", err.response?.data || err.message);
+    res.status(500).json({ error: "Ошибка генерации: " + (err.response?.data?.error?.message || err.message) });
   }
 });
-
+ 
 cron.schedule("* * * * *", async () => {
   const now = new Date();
   const db = readDB();
@@ -251,7 +257,7 @@ cron.schedule("* * * * *", async () => {
     writeDB(db);
   }
 });
-
+ 
 app.listen(PORT, () => {
   console.log(`🚀 AutoPostly сервер запущен на порту ${PORT}`);
   console.log(`⏰ Планировщик запущен — проверяет посты каждую минуту`);
