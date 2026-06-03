@@ -187,7 +187,8 @@ app.get("/api/health", (req, res) => {
 });
  
 app.post("/api/generate", async (req, res) => {
-  const { message, platform, contentType, tone } = req.body;
+  const { message, platform, contentType, tone, length } = req.body;
+  const lengthInstruction = length === "Короткий" ? "Пиши коротко — 2-3 строки." : length === "Длинный" ? "Пиши подробно — 10-15 строк." : "Пиши средний текст — 5-8 строк.";
   if (!message) return res.status(400).json({ error: "Нет текста" });
   try {
     const response = await axios.post(
@@ -197,7 +198,7 @@ app.post("/api/generate", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `Ты профессиональный SMM-копирайтер. Пишешь посты на русском языке. Платформа: ${platform || "Telegram"}. Тип: ${contentType || "Пост"}. Тон: ${tone || "Дружелюбный"}. Пиши живо, 5-8 строк, с эмодзи.`
+            content: `Ты профессиональный SMM-копирайтер. Пишешь посты на русском языке. Платформа: ${platform || "Telegram"}. Тип: ${contentType || "Пост"}. Тон: ${tone || "Дружелюбный"}. Пиши живо, с эмодзи. ${lengthInstruction}`
           },
           { role: "user", content: message }
         ],
